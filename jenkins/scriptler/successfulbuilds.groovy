@@ -1,11 +1,10 @@
 import jenkins.model.Jenkins
-import java.util.HashMap
-project = Jenkins.instance.getItem(PERF_TEST)
-def builds = project.getBuilds()
-java.util.Map map = new java.util.HashMap()
-for (hudson.model.FreeStyleBuild item : builds) {
-   if (item.getResult().toString().equals("SUCCESS")) {
-       map.put(item.getNumber(),item.toString())
-    }
- }
-return map
+import java.util.TreeMap
+java.util.Map map = new java.util.TreeMap()
+project = Jenkins.instance.getItem('agent-smith-perf-test-ms')
+successfulBuilds = project.getBuilds().findAll({ it.getResult().toString().equals("SUCCESS") }).reverse()
+for (hudson.model.FreeStyleBuild build : successfulBuilds) {
+  map.put(build.getNumber(), build)
+}
+NavigableMap nmap=map.descendingMap();
+return nmap
