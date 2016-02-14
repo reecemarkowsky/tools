@@ -4,36 +4,34 @@ import groovy.text.SimpleTemplateEngine
 import groovy.text.Template
 import groovy.json.JsonSlurper
 
-project = Jenkins.instance.getItem(PERF_TEST)
-
-buildsToCompareTokens = new String(BUILDS_TO_COMPARE)
-buildNums = buildsToCompareTokens.tokenize( ',' ).collect{ it.toInteger() }.sort().reverse()
-
-
-buildA = buildParams(a_build)
-buildB = buildParams(b_build)
-offset = buildB[1].toLong().intdiv(1000) - buildA[1].toLong().intdiv(1000)
-println offset 
-
-Map bindings = new HashMap();
-bindings.put("title", "agent-smith-perf-test-ms-nofilter-bullets Build:"+a_build+" vs Build:"+b_build)
-bindings.put("cluster_id_a", buildA[0]);
-bindings.put("cluster_id_b", buildB[0]);
-bindings.put("offset",String.valueOf(offset));
-
-SimpleTemplateEngine simpleTemplateEngine = new SimpleTemplateEngine();
-Template template = simpleTemplateEngine.createTemplate(jsonTemplate);
-Writable writable = template.make(bindings);
-String jsonPublish = writable.toString();
-
-def response = ["curl", "-k", "-X", "POST", "-H", "Content-Type: application/json", "-d", "${jsonPublish}", "https://app.datadoghq.com/api/v1/dash?api_key=40b9a1db96b8dd5b12083e228f9e1b62&application_key=b755858c86e04b0919392cc99dfab78e736c8747"].execute().text
-
-def jsonSlurper = new JsonSlurper()
-def result = jsonSlurper.parseText(response)
-println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + buildB[1] + '&to_ts=' + buildA[2] + '&tile_size=m'
+def firstRequestTemplate  = /
+        {"q": "<%= metric %>{matrix_cluster_id:<%= cluster_id %>}","style": {"width": "thick"},"type": "line"}/
+def offsetRequestTemplate = /
+        {"q": "timeshift(<%= metric %>{matrix_cluster_id:<%= cluster_id %>}, <%= offset %>)","style": {"type": "dotted","width": "normal"},"type": "line"}/
+def graphTemplate = /
+        {
+            "title": "<%= title %>",
+            "definition": {
+                "events": [],
+                "requests": [ <%= requests %> ]},
+                "viz": "timeseries"
+        }/
 
 
-def buildParams = { int bld ->
+def dashTemplate = /
+  {
+	"graphs": [ <%= graphs %>  ],
+	"title": "<%= title %>",
+	"description": "<%= title %>",
+	"template_variables": [{
+		"name": "host1",
+		"prefix": "host",
+		"default": "host:my-host"
+	}]
+}/
+
+def buildParams = { bld ->
+    println "retrieving parameters for build: " + bld
     hudson.model.FreeStyleBuild build = project.getBuildByNumber(bld)
     hudson.EnvVars vars = build.getEnvironment()
     File logFile = build.getLogFile()
@@ -60,82 +58,65 @@ def buildParams = { int bld ->
     Date buildEndDate = new Date().parse("y-M-d k:m:s.S",end_date + " " + end_time)
     def start = String.valueOf(buildStartDate.getTime())
     def end = String.valueOf(buildEndDate.getTime())
-    println start
-    println end
-    [matrix_cluster_id, start, end]
+    [bld, matrix_cluster_id, start, end]
 }
 
+def fillTemplate = { Map bindings, String jsonTemplate ->
+    SimpleTemplateEngine simpleTemplateEngine = new SimpleTemplateEngine();
+    Template template = simpleTemplateEngine.createTemplate(jsonTemplate);
+    Writable writable = template.make(bindings);
+    writable.toString();
+}
 
-def jsonTemplate = /
-  {
-	"graphs": [{
-		"title": "Ingestion 5m Rate",
-		"definition": {
-			"events": [],
-			"requests": [{
-				"q": "ingestion.events.ingested.m5_rate{matrix_cluster_id:<%= cluster_id_a %>}",
-				"style": {
-					"width": "thick"
-				},
-				"type": "line"
-			}, {
-				"q": "timeshift(ingestion.events.ingested.m5_rate{matrix_cluster_id:<%= cluster_id_b %>}, <%= offset %>)",
-				"style": {
-					"type": "dotted",
-					"width": "normal"
-				},
-				"type": "line"
-			}]
-		},
-		"viz": "timeseries"
-	},{
-		"title": "Matrix End-End Latency p99.9",
-		"definition": {
-			"events": [],
-			"requests": [{
-				"q": "matrix.latency.histogram.p999{matrix_cluster_id:<%= cluster_id_a %>}",
-				"style": {
-					"width": "thick"
-				},
-				"type": "line"
-			}, {
-				"q": "timeshift(matrix.latency.histogram.p999{matrix_cluster_id:<%= cluster_id_b %>}, <%= offset %>)",
-				"style": {
-					"type": "dotted",
-					"width": "normal"
-				},
-				"type": "line"
-			}]
-		},
-		"viz": "timeseries"
-	},{
-		"title": "Throughput Orchestrations",
-		"definition": {
-			"events": [],
-			"requests": [{
-				"q": "storm.matrix_pipelines_messages_received{matrix_cluster_id:<%= cluster_id_a %>}",
-				"style": {
-					"width": "thick"
-				},
-				"type": "line"
-			}, {
-				"q": "timeshift(storm.matrix_pipelines_messages_received{matrix_cluster_id:<%= cluster_id_b %>}, <%= offset %>)",
-				"style": {
-					"type": "dotted",
-					"width": "normal"
-				},
-				"type": "line"
-			}]
-		},
-		"viz": "timeseries"
-	}
-              ],
-	"title": "<%= title %>",
-	"description": "<%= title %>",
-	"template_variables": [{
-		"name": "host1",
-		"prefix": "host",
-		"default": "host:my-host"
-	}]
-}/
+buildsToCompareTokens = new String(BUILDS_TO_COMPARE)
+println "build numbers" + buildsToCompareTokens
+project = Jenkins.instance.getItem(PROJECT_NAME)
+println "project:" + project
+metrics = new String(METRICS)
+println "metrics: " + metrics
+buildNums = buildsToCompareTokens.tokenize( ',' ).collect{ it.toInteger() }
+graphs = buildNums.collect { buildParams(it) }
+mostRecentStartTime = graphs[0][2]
+println mostRecentStartTime
+graphsWithOffsets = graphs.collect { it.plus(new BigInteger(it[2]).intdiv(1000) - new BigInteger(mostRecentStartTime).intdiv(1000)) }
+String graphs = ""
+metricList = metrics.tokenize( ',' )
 
+for (String metric: metricList) {
+    String requests = ""
+    for (int i=0; i < graphsWithOffsets.size(); i++) {
+        Map reqBindings = new HashMap()
+        reqBindings.put("metric", metric)
+        reqBindings.put("cluster_id", graphsWithOffsets[i][1])
+        reqBindings.put("offset",graphsWithOffsets[i][4])
+        if (i == 0) {
+            requests += fillTemplate(reqBindings,firstRequestTemplate)
+        } else {
+            requests += fillTemplate(reqBindings,offsetRequestTemplate)
+        }
+        if (i < graphsWithOffsets.size() - 1) {
+            requests += ","
+        }
+    }
+    Map graphBindings = new HashMap()
+    graphBindings.put("title",metric)
+    graphBindings.put("requests",requests)
+    graph = fillTemplate(graphBindings,graphTemplate)
+    graphs += graph
+    if (metric != metricList.last()) {
+        graphs += ","
+    }
+}
+
+Map dashBindings = new HashMap()
+dashBindings.put("title","Agentsmith Perf Comparison")
+dashBindings.put("graphs",graphs)
+
+dashboard = fillTemplate(dashBindings,dashTemplate)
+def response = ["curl", "-k", "-X", "POST", "-H", "Content-Type: application/json", "-d", "${dashboard}", "https://app.datadoghq.com/api/v1/dash?api_key=40b9a1db96b8dd5b12083e228f9e1b62&application_key=b755858c86e04b0919392cc99dfab78e736c8747"].execute().text
+
+def jsonSlurper = new JsonSlurper()
+def result = jsonSlurper.parseText(response)
+firstGraph = graphsWithOffsets.last()
+lastGraph = graphsWithOffsets.first()
+println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + lastGraph[3] + '&tile_size=m'
