@@ -56,6 +56,8 @@ def buildParams = { bld ->
     }
     Date buildStartDate = new Date().parse("y-M-d k:m:s.S",start_date + " " + start_time)
     Date buildEndDate = new Date().parse("y-M-d k:m:s.S",end_date + " " + end_time)
+    println buildStartDate
+    println buildEndDate
     def start = String.valueOf(buildStartDate.getTime())
     def end = String.valueOf(buildEndDate.getTime())
     [bld, matrix_cluster_id, start, end]
@@ -117,6 +119,6 @@ def response = ["curl", "-k", "-X", "POST", "-H", "Content-Type: application/jso
 
 def jsonSlurper = new JsonSlurper()
 def result = jsonSlurper.parseText(response)
-firstGraph = graphsWithOffsets.last()
-lastGraph = graphsWithOffsets.first()
-println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + lastGraph[3] + '&tile_size=m'
+firstGraph = graphsWithOffsets.first()
+lastGraph = graphsWithOffsets.last()
+println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + firstGraph[3] + '&tile_size=m'
