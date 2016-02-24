@@ -91,6 +91,12 @@ String graphs = ""
 metricList = metrics.tokenize( ',' )
 
 for (String metric: metricList) {
+    title = metric
+    if (metric.contains(":")) {
+        metric_and_title = metric.tokenize( ':' )
+        metric = metric_and_title[0]
+        title = metric_and_title[1]
+    }
     String requests = ""
     for (int i=0; i < graphsWithOffsets.size(); i++) {
         Map reqBindings = new HashMap()
@@ -116,7 +122,7 @@ for (String metric: metricList) {
         }
     }
     Map graphBindings = new HashMap()
-    graphBindings.put("title",metric)
+    graphBindings.put("title",title)
     graphBindings.put("requests",requests)
     graph = fillTemplate(graphBindings,graphTemplate)
     graphs += graph
@@ -138,4 +144,3 @@ def result = jsonSlurper.parseText(response)
 firstGraph = graphsWithOffsets.first()
 lastGraph = graphsWithOffsets.last()
 println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + firstGraph[3] + '&tile_size=l'
-
