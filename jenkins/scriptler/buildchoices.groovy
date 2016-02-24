@@ -5,9 +5,15 @@ import groovy.text.Template
 import groovy.json.JsonSlurper
 
 def firstRequestTemplate  = /
-        {"q": "<%= metric %>{matrix_cluster_id:<%= cluster_id %>}","style": {"width": "thick"},"type": "line"}/
+        {"q": "<%= metric %>{matrix_cluster_id:<%= cluster_id %>} ","style": {"width": "thick"},"type": "line"}/
 def offsetRequestTemplate = /
         {"q": "timeshift(<%= metric %>{matrix_cluster_id:<%= cluster_id %>}, <%= offset %>)","style": {"type": "dotted","width": "normal"},"type": "line"}/
+
+def firstSumWithRollupRequestTemplate  = /
+        {"q": "sum:<%= metric %>{matrix_cluster_id:<%= cluster_id %>} by {matrix_cluster_id,flowid}.rollup(avg,60)","style": {"width": "thick"},"type": "area"}/
+def offsetSumWithRollupRequestTemplate = /
+        {"q": "timeshift(sum:<%= metric %>{matrix_cluster_id:<%= cluster_id %>} by {matrix_cluster_id,flowid}.rollup(avg,60), <%= offset %>)","style": {"type": "dashed","width": "normal"},"type": "area"}/
+
 def graphTemplate = /
         {
             "title": "<%= title %>",
@@ -92,9 +98,18 @@ for (String metric: metricList) {
         reqBindings.put("cluster_id", graphsWithOffsets[i][1])
         reqBindings.put("offset",graphsWithOffsets[i][4])
         if (i == 0) {
+          // ugly hack for now
+          if (metric.contains("matrix_pipelines_messages_received")) {
+             requests += fillTemplate(reqBindings,firstSumWithRollupRequestTemplate)
+          } else {
             requests += fillTemplate(reqBindings,firstRequestTemplate)
+          }
         } else {
+          if (metric.contains("matrix_pipelines_messages_received")) {
+             requests += fillTemplate(reqBindings,offsetSumWithRollupRequestTemplate)
+          } else {
             requests += fillTemplate(reqBindings,offsetRequestTemplate)
+          }
         }
         if (i < graphsWithOffsets.size() - 1) {
             requests += ","
@@ -111,14 +126,16 @@ for (String metric: metricList) {
 }
 
 Map dashBindings = new HashMap()
-dashBindings.put("title","Agentsmith Perf Comparison")
+dashBindings.put("title",project.getName() + " perf analysis for builds:" + buildsToCompareTokens)
 dashBindings.put("graphs",graphs)
 
 dashboard = fillTemplate(dashBindings,dashTemplate)
+println dashboard
 def response = ["curl", "-k", "-X", "POST", "-H", "Content-Type: application/json", "-d", "${dashboard}", "https://app.datadoghq.com/api/v1/dash?api_key=40b9a1db96b8dd5b12083e228f9e1b62&application_key=b755858c86e04b0919392cc99dfab78e736c8747"].execute().text
 
 def jsonSlurper = new JsonSlurper()
 def result = jsonSlurper.parseText(response)
 firstGraph = graphsWithOffsets.first()
 lastGraph = graphsWithOffsets.last()
-println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + firstGraph[3] + '&tile_size=m'
+println "https://app.datadoghq.com" + result.url + '?live=false&page=0&is_auto=false&from_ts=' + firstGraph[2] + '&to_ts=' + firstGraph[3] + '&tile_size=l'
+
