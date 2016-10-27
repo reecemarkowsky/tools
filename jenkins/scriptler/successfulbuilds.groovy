@@ -1,11 +1,12 @@
 import jenkins.model.Jenkins
-import java.util.TreeMap
-java.util.Map map = new java.util.TreeMap()
-project = Jenkins.instance.getItem(PROJECT_NAME)
-successfulBuilds = project.getBuilds().findAll({ it.getResult().toString().equals("SUCCESS") })
-for (hudson.model.FreeStyleBuild build : successfulBuilds) {
-  map.put(build.getNumber(), build.toString())  
-}
-
-NavigableMap nmap=map.descendingMap();
-return nmap
+import java.util.HashMap
+project = Jenkins.instance.getItem(PERF_TEST)
+def builds = project.getBuilds()
+java.util.Map map = new java.util.HashMap()
+for (hudson.model.FreeStyleBuild item : builds) {
+   if (item.getResult().toString().equals("SUCCESS")) {
+       map.put(item.getNumber(),item.toString())
+    }
+ }
+map.put("3b","3b")
+return map
